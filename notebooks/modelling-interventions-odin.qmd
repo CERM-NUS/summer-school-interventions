@@ -1,0 +1,388 @@
+---
+title: "Modelling Interventions in Odin"
+format:
+  html:
+    code-fold: true
+    embed-resources: true
+  # docx: default
+toc: true
+highlight-style: pygments
+keywords:
+  - Infectious Disease Modelling
+  - Odin
+  - Interventions
+license: "CC BY"
+copyright: 
+  holder: MiDSEA Teaching Team
+  year: 2024
+bibliography: references.bib
+csl: transactions-on-the-web.csl
+code-annotations: below
+---
+
+
+# Odin {#part-1}
+
+### SIR Model
+
+We will first review the `SIR` model covered earlier in the summer school. The 
+model can be represented using flow diagrams as shown in  @fig-sir or defined by
+a sequence of ordinary differential equations (ODEs)as shown below:
+The differential equations for the model are:
+\begin{align*}
+\frac{dS}{dt} &= -\beta S I \\
+\frac{dI}{dt} &= \beta S I - \gamma I \\
+\frac{dR}{dt} &= \gamma I
+\end{align*}
+
+```{dot}
+//| label: fig-sir
+//| fig-cap: "SIR model diagram"
+digraph SIR {
+    rankdir=LR; // horizontal layout
+    node [shape=rectangle, fontname=Arial];
+    S [label="S\n(Susceptible)"];
+    I [label="I\n(Infectious)"];
+    R [label="R\n(Removed)"];
+
+    S -> I [label="βIS"];
+    I -> R [label="γI"];
+    
+}
+```
+
+The parameters of the model are:
+
+- $\beta$ - the transmission rate
+- $\gamma$ - the rate of recovery
+
+We will assume that on average a person recovers in 5 days, which means $\gamma = \dfrac{1}{5} = 0.2 \text{ per day}$.
+
+
+We know that for SIR model $R_0 = \beta \times \dfrac{N}{\gamma},$ where `N` is the population of the country. Assume Singapore, i.e., $N=5.7e6$
+
+If we are modelling a disease with $R_0=2.5$, then we get $\beta = 2.5 \times  \dfrac{0.2}{5700000} = 8.77 \times 10^{-8} \text{ per(day} \times \text{person)}$.
+
+We can now use these values to simulate the SIR model. We will use the `odin` package to do this. The code for model is shown below @lst-sir-simulation.
+
+```{r}
+#| lst-label: lst-sir-simulation
+#| lst-cap: Implementation of the SIR model in odin
+#| label: code-simulation
+#| output: false
+
+
+library(odin)
+library(tidyverse)
+
+# define the model
+sir_ode <- odin::odin({
+  # Derivatives
+  deriv(S) <- -beta * S * I
+  deriv(I) <- beta * S * I  - gamma * I
+  deriv(R) <- gamma * I
+  
+  # Total population
+  N <- S + I + R
+  
+  # Initial conditions
+  initial(S) <- N_ini - I_ini
+  initial(I) <- I_ini
+  initial(R) <- 0
+  
+  # user defined values
+  # user defined values can be given another value
+  # while initializing
+  N_ini <- user(5700000)
+  I_ini <- user(1)
+  
+  # user defined parameters
+  beta <- user(8.77e-8)
+  gamma <- user(0.2)
+})
+```
+
+
+Refer to @lst-sir-run for code to run the model and @fig-sir-output for the output.
+
+```{r}
+#| lst-label: lst-sir-run
+#| lst-cap: Running SIR model
+#| label: fig-sir-output
+#| fig-cap: "Simulation of the SIR model for 100 days"
+#| warning: false
+
+
+# initialize model
+sir_mod <- sir_ode$new()
+# how long to run
+times <- seq(0,100)
+# run the model
+sir_out <- sir_mod$run(times)
+# extracting data as tibble
+df_sir_out <- as.data.frame(sir_out)
+# plotting data
+p_sir <- df_sir_out %>%
+  ggplot(aes(x = t, color = name)) +
+  geom_line(aes(y=S, color="S"), alpha = 0.95) +
+  geom_line(aes(y=I, color="I"), alpha = 0.95) +
+  geom_line(aes(y=R, color="R"), alpha = 0.95) +
+  scale_colour_discrete(limits = c("S", "I", "R")) +
+  xlab("Time") +
+  ylab("Total number of Individuals\n") +
+  labs(color="Compartment") +
+  theme_classic(base_size = 20) +
+  theme(legend.justification = 0, legend.position = c(0.65, 0.55)) 
+p_sir
+```
+
+### SEIR-Birth-Death Model
+
+An `SEIR` model with birth and deaths is shown in @fig-seir. Here, we have assumed that the birth and death rates are the equal. 
+
+```{dot}
+//| label: fig-seir
+//| fig-cap: "SEIR model diagram"
+digraph SEIR {
+    rankdir=LR; // horizontal layout
+    node [shape=rectangle, fontname=Arial];
+    S [label="S\n(Susceptible)"];
+    E [label="E\n(Latent\\Exposed)"];
+    I [label="I\n(Infectious)"];
+    R [label="R\n(Removed)"];
+
+    S -> E [label="βIS"];
+    E -> I [label="λE"];
+    I -> R [label="γI"];
+    edge [dir=front, label="μ(S+E+I+R)"];
+    muS [style=invis, shape=none, height=0, width=0];
+    muS ->  S;
+
+    edge [label="μR"];
+    { rank=same; R; deltaR [style=invis, shape=none, height=0, width=0]}
+    R -> deltaR ; 
+
+    edge [label="μI"];
+    { rank=same; I; deltaI [style=invis, shape=none, height=0, width=0]}
+    I -> deltaI;
+
+     edge [label="μE"];
+    { rank=same; E; deltaE [style=invis, shape=none, height=0, width=0]}
+    E -> deltaE;
+
+    edge [label="μS"];
+    { rank=same; S; deltaS [style=invis;shape=none, height=0, width=0]}
+    S -> deltaS ;
+    
+}
+
+```
+
+The modified differential equations for the model are:
+
+\begin{align*}
+\frac{dS}{dt} &= -\beta IS - \mu S + \mu (S+E+I+R) \\
+\frac{dE}{dt} &= \beta IS - \lambda E - \mu E \\
+\frac{dI}{dt} &= \lambda E - \gamma I - \mu I \\
+\frac{dR}{dt} &= \gamma I - \mu R
+\end{align*}
+
+The parameters of the model are:
+
+- $\beta$ - the transmission rate
+- $\lambda$ - the rate of progression from the latent to the infectious state
+- $\gamma$ - the rate of recovery
+- $\mu$ - the rate of birth and death
+
+There are two new parameters in this model when compared to the previous model. 
+
+The life expectancy in Singapore is 83 years[@BibEntry2024Feb].which gives us a death rate of $\mu = \dfrac{1}{(83.5 \times 365)} = 3.30 \times 10^{-5} \text{ per day}$.
+
+For $\lambda$, we assume people that people remain on average latent for 2 days, hence $\lambda = \dfrac{1}{2} = 0.5 \text{ per day}$.
+
+The code for model is shown below @lst-seir-simulation. The @fig-seir-output shows the simulation of the epidemic as per the model.
+
+```{r}
+#| lst-label: lst-seir-simulation
+#| lst-cap: Implementation of the SEIR model in odin
+#| label: seir-code-simulation
+#| output: false
+
+# define the model
+seir_ode <- odin::odin({
+  ## Derivatives
+  deriv(S) <- -beta * S * I + mu*N  -mu*S
+  deriv(E) <- beta * S * I - lambda * E - mu *E
+  deriv(I) <- lambda * E  - gamma * I - mu * I
+  deriv(R) <- gamma * I - mu * R
+  
+  # Total population
+  N <- S + E + I + R
+  
+  # Initial conditions
+  initial(S) <- N_ini - I_ini
+  initial(I) <- I_ini
+  initial(R) <- 0
+  initial(E) <- 0
+  
+  # user defined values
+  # user defined values can be given another value
+  # while initializing
+  N_ini <- user(5700000)
+  I_ini <- user(1)
+  
+  # user defined parameters
+  beta <- user(8.77e-8)
+  gamma <- user(0.2)
+  lambda <- user(0.5)
+  mu <- user(3.3e-5)
+})
+```
+
+```{r}
+#| lst-label: lst-seir-run
+#| lst-cap: Run SEIR model
+#| label: fig-seir-output
+#| fig-cap: "Simulation of the SEIR model for 150 days"
+#| warning: false
+
+
+# initialize model
+seir_mod <- seir_ode$new()
+# how long to run
+times <- seq(0,150)
+# run the model
+seir_out <- seir_mod$run(times)
+# extracting data as tibble
+df_seir_out <- as.data.frame(seir_out)
+# plotting data
+p_seir <- df_seir_out %>%
+  ggplot(aes(x = t, color = name)) +
+  geom_line(aes(y=S, color="S"), alpha = 0.95) +
+  geom_line(aes(y=I, color="I"), alpha = 0.95) +
+  geom_line(aes(y=R, color="R"), alpha = 0.95) +
+  scale_colour_discrete(limits = c("S", "I", "R")) +
+  xlab("Time") +
+  ylab("Total number of Individuals\n") +
+  labs(color="Compartment") +
+  theme_classic(base_size = 20) +
+  theme(legend.justification = 0, legend.position = c(0.05, 0.55)) 
+p_seir
+```
+
+::: {.callout-caution collapse="true"}
+
+## Liberty taken
+
+### Units of parameters
+From here on, we will take liberty of not mentioning the units of the parameters. 
+
+### Flow diagrams
+We will only write differential equations from now. 
+:::
+
+# Shock-Intervention {#part-2}
+
+One of the most common ways of modelling interventions is doing a scenario analysis by assuming that your intervention will reduce the contacts by a constant factor. 
+
+Let us first write the model equations for this system, assuming our base model is the one discussed in @fig-seir. 
+
+\begin{align*}
+\frac{dS}{dt} &= -\beta(t) IS - \mu S + \mu (S+E+I+R) \\
+\frac{dE}{dt} &= \beta(t) IS - \lambda E - \mu E \\
+\frac{dI}{dt} &= \lambda E - \gamma I - \mu I \\
+\frac{dR}{dt} &= \gamma I - \mu R
+\end{align*}
+
+Where the transmission rate $\beta(t)$ changes at a specific time $t_1$ due to an intervention:
+
+\begin{align*}
+\beta(t) = 
+\begin{cases} 
+\beta_0 & \text{if } t < t_1 \\
+\beta_1 & \text{if } t \geq t_1 
+\end{cases}
+\end{align*}
+
+
+The code for model is shown below @lst-tv-simulation, assuming we do an intervention at $t_1=80$ and it reduces contacts by $20\%$. The @fig-tv-output shows the simulation of the epidemic as per the model.
+
+```{r}
+#| lst-label: lst-tv-simulation
+#| lst-cap: Implementation of the SEIR model with a shock intervention at $t_1=50$
+#| label: tv-code-simulation
+#| output: false
+
+# define the model
+tv_ode <- odin::odin({
+  ## Derivatives
+  deriv(S) <- -beta * S * I + mu*N  -mu*S
+  deriv(E) <- beta * S * I - lambda * E - mu *E
+  deriv(I) <- lambda * E  - gamma * I - mu * I
+  deriv(R) <- gamma * I - mu * R
+  
+  # Total population
+  N <- S + E + I + R
+  ## Time-varying reproduction number Rt
+  beta <- if (t < change_time) beta_0 else beta_0 * reduction
+  
+  
+  # Initial conditions
+  initial(S) <- N_ini - I_ini
+  initial(I) <- I_ini
+  initial(R) <- 0
+  initial(E) <- 0
+  
+  # user defined values
+  # user defined values can be given another value
+  # while initializing
+  N_ini <- user(5700000)
+  I_ini <- user(1)
+  
+  # user defined parameters
+  beta_0 <- user(8.77e-8)
+  gamma <- user(0.2)
+  lambda <- user(0.5)
+  mu <- user(3.3e-5)
+  reduction <- user(0.8) # Reduction in R0 due to interventions
+  change_time <- user(80) # Time of intervention
+})
+```
+
+```{r}
+#| lst-label: lst-tv-run
+#| lst-cap: Run SEIR model
+#| label: fig-tv-output
+#| fig-cap: "Simulation of the SEIR model with a shock intervention at $t_1=80$ aand reduction by 20%"
+#| warning: false
+
+
+# initialize model
+tv_mod <- tv_ode$new()
+# how long to run
+times <- seq(0,150)
+# run the model
+tv_out <- tv_mod$run(times)
+# extracting data as tibble
+df_tv_out <- as.data.frame(tv_out)
+# plotting data
+p_tv <- df_tv_out %>%
+  ggplot(aes(x = t, color = name)) +
+  geom_line(aes(y=S, color="S"), alpha = 0.95) +
+  geom_line(aes(y=I, color="I"), alpha = 0.95) +
+  geom_line(aes(y=R, color="R"), alpha = 0.95) +
+  geom_vline(xintercept = 80, linetype = "dashed", color = "grey", size = 1.5) +
+  scale_colour_discrete(limits = c("S", "I", "R")) +
+  xlab("Time") +
+  ylab("Total number of Individuals\n") +
+  labs(color="Compartment") +
+  theme_classic(base_size = 20) +
+  theme(legend.justification = 0, legend.position = c(0.05, 0.55)) 
+p_tv
+```
+
+::: {.callout-tip}
+## Think
+
+Observe the differences between the @fig-seir-output and @fig-tv-output. What you think caused this? Can you change the code to see the effect of timing and reduction on the epidemic.
+:::
