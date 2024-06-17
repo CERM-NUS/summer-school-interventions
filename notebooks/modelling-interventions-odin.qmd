@@ -82,9 +82,6 @@ sir_ode <- odin::odin({
   deriv(I) <- beta * S * I  - gamma * I
   deriv(R) <- gamma * I
   
-  # Total population
-  N <- S + I + R
-  
   # Initial conditions
   initial(S) <- N_ini - I_ini
   initial(I) <- I_ini
@@ -210,13 +207,13 @@ The code for model is shown below @lst-seir-simulation. The @fig-seir-output sho
 
 # define the model
 seir_ode <- odin::odin({
-  ## Derivatives
+  # Derivatives
   deriv(S) <- -beta * S * I + mu*N  -mu*S
   deriv(E) <- beta * S * I - lambda * E - mu *E
   deriv(I) <- lambda * E  - gamma * I - mu * I
   deriv(R) <- gamma * I - mu * R
   
-  # Total population
+  # Total Population
   N <- S + E + I + R
   
   # Initial conditions
@@ -320,12 +317,12 @@ tv_ode <- odin::odin({
   deriv(E) <- beta * S * I - lambda * E - mu *E
   deriv(I) <- lambda * E  - gamma * I - mu * I
   deriv(R) <- gamma * I - mu * R
-  
-  # Total population
-  N <- S + E + I + R
+
   ## Time-varying reproduction number Rt
   beta <- if (t < change_time) beta_0 else beta_0 * reduction
   
+  # Total Population
+  N <- S + E + I + R
   
   # Initial conditions
   initial(S) <- N_ini - I_ini
@@ -385,4 +382,89 @@ p_tv
 ## Think
 
 Observe the differences between the @fig-seir-output and @fig-tv-output. What you think caused this? Can you change the code to see the effect of timing and reduction on the epidemic.
+:::
+
+# Modelling Quaratine {#part-3}
+
+Quarantine, generally involves separating and restricting the movement of people who may have been exposed to a contagious disease.
+
+Let us first write the model equations for this system, assuming our base model is the one discussed in @fig-sir. 
+
+::: {.callout-tip collapse="true"}
+## Click to reveal the ODE  for the model
+\begin{align*}
+\frac{dS}{dt} &= -\beta S I - \phi S + \psi Q \\
+\frac{dI}{dt} &= \beta S I - \gamma I \\
+\frac{dQ}{dt} &= \phi S - \psi Q - \epsilon Q \\
+\frac{dR}{dt} &= \gamma I + \epsilon Q
+\end{align*}
+
+- \beta  is the transmission rate.
+- \gamma  is the recovery rate of infected individuals.
+- \phi  is the rate at which susceptible individuals are quarantined.
+- \psi  is the rate at which quarantined individuals return to the susceptible pool if not found infected.
+- \epsilon  is the rate at which quarantined individuals move to the recovered status, assuming they were infected but didn't contribute to infecting people.
+:::
+
+::: {.callout-caution}
+There can be different variations and all can be correct. 
+:::
+
+```{r}
+#| output: false
+sirq_ode <- odin::odin({
+  # Derivatives
+  deriv(S) <- -beta * S * I - phi * S + psi * Q
+  deriv(I) <- beta * S * I  - gamma * I
+  deriv(Q) <- phi * S - psi * Q - epsilon * Q
+  deriv(R) <- gamma * I + epsilon * Q
+  
+  
+  # Initial conditions
+  initial(S) <- N_ini - I_ini
+  initial(I) <- I_ini
+  initial(Q) <- 0
+  initial(R) <- 0
+  
+  # user defined values
+  # user defined values can be given another value
+  # while initializing
+  N_ini <- user(5700000)
+  I_ini <- user(1)
+  
+  # user defined parameters
+  beta <- user(8.77e-8)
+  gamma <- user(0.2)
+  phi <- user(0.005)
+  psi <- user(0.1)
+  epsilon <- user(0.1)
+})
+# initialize model
+sirq_mod <- sirq_ode$new()
+# how long to run
+times <- seq(0,150)
+# run the model
+sirq_out <- sirq_mod$run(times)
+# extracting data as tibble
+df_sirq_out <- as.data.frame(sirq_out)
+# plotting data
+p_sirq <- df_sirq_out %>%
+  ggplot(aes(x = t, color = name)) +
+  geom_line(aes(y=S, color="S"), alpha = 0.95) +
+  geom_line(aes(y=I, color="I"), alpha = 0.95) +
+  geom_line(aes(y=R, color="R"), alpha = 0.95) +
+  geom_line(aes(y=Q, color="Q"), alpha = 0.95) +
+  scale_colour_discrete(limits = c("S", "I", "R", "Q")) +
+  xlab("Time") +
+  ylab("Total number of Individuals\n") +
+  labs(color="") +
+  theme_classic(base_size = 20) +
+  theme(legend.justification = 0, legend.position = c(0.05, 0.55)) 
+p_sirq
+```
+
+::: {.callout-tip}
+## Think
+
+What can you observe with your model? Is there something specific you want to change? 
 :::
